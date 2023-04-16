@@ -39,6 +39,8 @@ static const char KEY_NOT_FOUND[] = "Failed to find key";
 static const char BAD_SECTION_NAME[] = "Bad section name";
 static const char BAD_KEY_NAME[] = "Bad key name";
 
+static const char EMPTY_OUTPUT[] = "Nothing to output";
+
 void raise(const char *errorMessage)
 {
     fprintf(stderr, "%s\n", errorMessage);
@@ -67,10 +69,11 @@ typedef struct Var
 
 int destroyVar(Var *var)
 {
-    if (var->next)
+    if (!var)
     {
-        destroyVar(var->next);
+        return 0;
     }
+    destroyVar(var->next);
     free(var->value);
     free(var);
     return 0;
@@ -95,11 +98,12 @@ typedef struct ParseVarRes
 ParseVarRes parseVar(Var *head, char *seq)
 {
     Var *var = malloc(sizeof(struct Var));
+    var->value = NULL;
+    var->next = NULL;
     if (head)
     {
         head->next = var;
     }
-    var->value = NULL;
 
     char *sectionStart = seq;
     char *innerDelimiter = strpbrk(sectionStart, INNER_DELIMITER);
@@ -134,10 +138,11 @@ typedef struct Operator
 
 int destroyOperator(Operator *operator)
 {
-    if (operator->next)
+    if (!operator)
     {
-        destroyOperator(operator->next);
+        return 0;
     }
+    destroyOperator(operator->next);
     free(operator);
     return 0;
 }
@@ -159,6 +164,7 @@ ParseOperatorRes parseOperator(Operator *head, char *seq)
     {
         Operator *operator= malloc(sizeof(struct Operator));
         operator->value = target;
+        operator->next = NULL;
         if (head)
         {
             head->next = operator;
@@ -176,14 +182,8 @@ typedef struct Query
 
 int destroyQuery(Query query)
 {
-    if (query.var)
-    {
-        destroyVar(query.var);
-    }
-    if (query.operator)
-    {
-        destroyOperator(query.operator);
-    }
+    destroyVar(query.var);
+    destroyOperator(query.operator);
     return 0;
 }
 
@@ -226,8 +226,7 @@ Query parseQuery(char *rawQuery)
         seq = parseOperatorRes.next;
     }
 
-    Query query = {rawQuery, var, operator};
-    return query;
+    return (Query){rawQuery, var, operator};
 }
 
 int hydrateQuery(Query query, FILE *source)
@@ -239,6 +238,15 @@ char *resolveQuery(Query query)
     char *output = malloc(sizeof(char) * 4);
     strcpy(output, "Out");
     return output;
+}
+
+FILE *openForRead(char *path)
+{
+    FILE *source = fopen(path, "r");
+    if (source == NULL)
+    {
+        raiseArgument(READ_ERROR, path);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -256,36 +264,35 @@ int main(int argc, char *argv[])
     char *rawQuery = argv[2];
     bool lintMode = strcmp(rawQuery, LINT_MODE) == 0;
 
-    Query query;
-    if (!lintMode)
-    {
-        query = parseQuery(rawQuery);
-    }
+    FILE *source = NULL;
+    char *output = NULL;
 
-    FILE *source = fopen(sourcePath, "r");
-    if (source == NULL)
-    {
-        raiseArgument(READ_ERROR, sourcePath);
-    }
-
-    char *output;
     if (lintMode)
     {
-        // TODO: lint
+        // TODO
     }
     else
     {
+        Query query = parseQuery(rawQuery);
+        source = openForRead(sourcePath);
         hydrateQuery(query, source);
-    }
-    fclose(source);
-
-    if (!lintMode)
-    {
         output = resolveQuery(query);
+        destroyQuery(query);
     }
-    destroyQuery(query);
 
-    printf("%s\n", output);
-    free(output);
+    if (source)
+    {
+        fclose(source);
+    }
+
+    if (output)
+    {
+        printf("%s\n", output);
+        free(output);
+    }
+    else
+    {
+        printf("%s\n", EMPTY_OUTPUT);
+    }
     return 0;
 }
