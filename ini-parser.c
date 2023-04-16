@@ -315,7 +315,7 @@ int hydrateQuery(Query query, FILE *source)
             }
             var->keyFound = true;
             char *value = skipSpaces(varAssignment + 1);
-            int valueLength = strlen(value);
+            int valueLength = strlen(value) + 1;
             var->value = malloc(sizeof(char) * valueLength);
             memcpy(var->value, value, sizeof(char) * valueLength);
             var = var->next;
