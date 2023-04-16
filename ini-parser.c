@@ -48,8 +48,7 @@ static const char KEY_NOT_FOUND[] = "Failed to find key";
 
 static const int MAX_OUTPUT = 1025;
 
-static const char BAD_SECTION_NAME[] = "Bad section name";
-static const char BAD_KEY_NAME[] = "Bad key name";
+static const char COMMENT[] = ";";
 
 void raise(const char *errorMessage)
 {
@@ -327,7 +326,7 @@ int hydrateQuery(Query query, FILE *source)
     return 0;
 }
 
-char *resolveQuery(Query query, char *output)
+int resolveQuery(Query query, char *output)
 {
     bool expressionMode = (bool)query.operator;
 
@@ -384,6 +383,70 @@ char *resolveQuery(Query query, char *output)
     }
 
     output[last] = 0;
+
+    return 0;
+}
+
+bool isValid(char target)
+{
+    int ascii = (int)target;
+    if (
+        ascii == 45 ||                // -
+        (47 < ascii && ascii < 58) || // 0-9
+        (64 < ascii && ascii < 91) || // A-Z
+        (96 < ascii && ascii < 123)   // a-z
+    )
+    {
+        return true;
+    }
+    return false;
+}
+
+int lint(FILE *source)
+{
+    int i = 0;
+    char line[MAX_LINE];
+    while (fgets(line, sizeof(line), source) != NULL)
+    {
+        i++;
+
+        int p = 0;
+        if (strchr(COMMENT, line[p]))
+        {
+            continue;
+        }
+
+        bool isSection = strchr(SECTION_START, line[p]);
+        p += 1;
+
+        while (line[p])
+        {
+            if (isSection)
+            {
+                if (strchr(SECTION_END, line[p]))
+                {
+                    break;
+                }
+            }
+            else
+            {
+                if ((line[p] == ' ' && line[p + 1] == '=') || line[p] == '=')
+                {
+                    break;
+                }
+            }
+
+            if (isValid(line[p]))
+            {
+                p += 1;
+                continue;
+            }
+
+            printf("%d: %s", i, line);
+            break;
+        }
+    }
+    return 0;
 }
 
 FILE *openForRead(char *path)
@@ -411,25 +474,23 @@ int main(int argc, char *argv[])
     char *rawQuery = argv[2];
     bool lintMode = strcmp(rawQuery, LINT_MODE) == 0;
 
-    FILE *source = NULL;
-    char output[MAX_OUTPUT];
-
     if (lintMode)
     {
-        source = openForRead(sourcePath);
+        FILE *source = openForRead(sourcePath);
+        lint(source);
         fclose(source);
-        // TODO
     }
     else
     {
         Query query = parseQuery(rawQuery);
-        source = openForRead(sourcePath);
+        FILE *source = openForRead(sourcePath);
         hydrateQuery(query, source);
         fclose(source);
+        char output[MAX_OUTPUT];
         resolveQuery(query, output);
         destroyQuery(query);
+        printf("%s", output);
     }
 
-    printf("%s", output);
     return 0;
 }
