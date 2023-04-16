@@ -13,11 +13,14 @@ static const int ARGUMENT_NUMBER = 2;
 static const char HELP_MESSAGE[] = M_BAD_ARGUMENTS
     "\n"
     "\nSingle query either:"
-    "\n1) fetches multiple variables separated by whitespace or \",\""
+    "\n1) fetches multiple variables separated by whitespace"
     "\n2) performs operations from \"" M_OPERATORS "\" set"
     "\n"
     "\nIMPORTANT: all operations are conducted sequentially"
-    "\n(in contradiction to the laws of mathematics)";
+    "\n(in contradiction to the laws of mathematics)"
+    "\n"
+    "\nMaximal supported line length is 1024 characters"
+    "\nMaximal output size is 1024 characters";
 
 static const char LINT_MODE[] = M_LINT_MODE;
 static const char BAD_ARGUMENTS[] = M_BAD_ARGUMENTS;
@@ -28,23 +31,35 @@ static const char INNER_DELIMITER[] = ".";
 static const char BAD_VAR_INPUT[] = "Variable is not in \"section.key\" format";
 static const char MISSING_VAR_INPUT[] = "Variable is missing";
 
-static const char OUTER_DELIMITER[] = M_OPERATORS " ,";
+static const char OUTER_DELIMITER[] = " ";
 
 static const char OPERATORS[] = M_OPERATORS;
 static const char BAD_OPERATOR_INPUT[] = "Some operators are missing";
 
+static const int MAX_LINE = 1025;
+
+static const char SECTION_START[] = "[";
+static const char SECTION_END[] = "]";
+
+static const char VAR_ASSIGNMENT[] = "=";
+
 static const char SECTION_NOT_FOUND[] = "Failed to find section";
 static const char KEY_NOT_FOUND[] = "Failed to find key";
 
+static const int MAX_OUTPUT = 1025;
+
 static const char BAD_SECTION_NAME[] = "Bad section name";
 static const char BAD_KEY_NAME[] = "Bad key name";
-
-static const char EMPTY_OUTPUT[] = "Nothing to output";
 
 void raise(const char *errorMessage)
 {
     fprintf(stderr, "%s\n", errorMessage);
     exit(1);
+}
+
+void errorArgument(const char *errorMessage, const char *argument)
+{
+    fprintf(stderr, "%s: \"%s\"\n", errorMessage, argument);
 }
 
 void raiseArgument(const char *errorMessage, const char *argument)
@@ -53,7 +68,7 @@ void raiseArgument(const char *errorMessage, const char *argument)
     {
         raise(errorMessage);
     }
-    fprintf(stderr, "%s: \"%s\"\n", errorMessage, argument);
+    errorArgument(errorMessage, argument);
     exit(1);
 }
 
@@ -61,8 +76,10 @@ typedef struct Var
 {
     char *section;
     int sectionLength;
+    bool sectionFound;
     char *key;
     int keyLength;
+    bool keyFound;
     char *value;
     struct Var *next;
 } Var;
@@ -89,46 +106,21 @@ char *skipSpaces(char *seq)
     return nonSpace;
 }
 
+char *spaceBack(char *seq)
+{
+    char *nonSpace = seq;
+    while (nonSpace && isspace(*nonSpace))
+    {
+        nonSpace -= 1;
+    }
+    return nonSpace + 1;
+}
+
 typedef struct ParseVarRes
 {
     Var *var;
     char *next;
 } ParseVarRes;
-
-ParseVarRes parseVar(Var *head, char *seq)
-{
-    Var *var = malloc(sizeof(struct Var));
-    var->value = NULL;
-    var->next = NULL;
-    if (head)
-    {
-        head->next = var;
-    }
-
-    char *sectionStart = seq;
-    char *innerDelimiter = strpbrk(sectionStart, INNER_DELIMITER);
-    if (!innerDelimiter)
-    {
-        destroyVar(var);
-        if (strlen(sectionStart))
-        {
-            raiseArgument(BAD_VAR_INPUT, sectionStart);
-        }
-        else
-        {
-            raise(MISSING_VAR_INPUT);
-        }
-    }
-    var->section = sectionStart;
-    var->sectionLength = innerDelimiter - sectionStart;
-
-    char *keyStart = innerDelimiter + 1;
-    char *outerDelimiter = strpbrk(keyStart, OUTER_DELIMITER);
-    var->key = keyStart;
-    var->keyLength = outerDelimiter ? outerDelimiter - keyStart : strlen(keyStart);
-
-    return (ParseVarRes){var, outerDelimiter};
-}
 
 typedef struct Operator
 {
@@ -153,14 +145,55 @@ typedef struct ParseOperatorRes
     char *next;
 } ParseOperatorRes;
 
+ParseVarRes parseVar(Var *head, char *seq, Operator *operator)
+{
+    Var *var = malloc(sizeof(struct Var));
+    var->sectionFound = false;
+    var->keyFound = false;
+    var->value = NULL;
+    var->next = NULL;
+    if (head)
+    {
+        head->next = var;
+    }
+
+    char *sectionStart = seq;
+    char *innerDelimiter = strpbrk(sectionStart, INNER_DELIMITER);
+    if (!innerDelimiter)
+    {
+        destroyVar(var);
+        destroyOperator(operator);
+        if (strlen(sectionStart))
+        {
+            raiseArgument(BAD_VAR_INPUT, sectionStart);
+        }
+        else
+        {
+            raise(MISSING_VAR_INPUT);
+        }
+    }
+    var->section = sectionStart;
+    var->sectionLength = innerDelimiter - sectionStart;
+
+    char *keyStart = innerDelimiter + 1;
+    char *outerDelimiter = strpbrk(keyStart, OUTER_DELIMITER);
+    var->key = keyStart;
+    if (outerDelimiter)
+    {
+        var->keyLength = outerDelimiter - keyStart;
+    }
+    else
+    {
+        var->keyLength = strlen(keyStart);
+    }
+
+    return (ParseVarRes){var, outerDelimiter};
+}
+
 ParseOperatorRes parseOperator(Operator *head, char *seq)
 {
     char *target = seq;
-    if (!target)
-    {
-        return (ParseOperatorRes){NULL, target};
-    }
-    if (strchr(OPERATORS, *target))
+    if (target && strchr(OPERATORS, *target))
     {
         Operator *operator= malloc(sizeof(struct Operator));
         operator->value = target;
@@ -171,6 +204,7 @@ ParseOperatorRes parseOperator(Operator *head, char *seq)
         }
         return (ParseOperatorRes){operator, target + 1 };
     }
+    return (ParseOperatorRes){NULL, target};
 }
 
 typedef struct Query
@@ -190,8 +224,10 @@ int destroyQuery(Query query)
 Query parseQuery(char *rawQuery)
 {
     char *seq = rawQuery;
+    Var *varHead = NULL;
     Var *var = NULL;
     int varLength = 0;
+    Operator *operatorHead = NULL;
     Operator *operator= NULL;
     int operatorLength = 0;
 
@@ -199,19 +235,21 @@ Query parseQuery(char *rawQuery)
     {
         seq = skipSpaces(seq);
 
-        ParseVarRes parseVarRes = parseVar(var, seq);
-        if (!var)
+        ParseVarRes parseVarRes = parseVar(var, seq, operatorHead);
+        var = parseVarRes.var;
+        if (!varHead)
         {
-            var = parseVarRes.var;
+            varHead = var;
         }
         varLength += 1;
 
         ParseOperatorRes parseOperatorRes = parseOperator(operator, skipSpaces(parseVarRes.next));
         if (parseOperatorRes.operator)
         {
-            if (!operator)
+            operator= parseOperatorRes.operator;
+            if (!operatorHead)
             {
-                operator= parseOperatorRes.operator;
+                operatorHead = operator;
             }
             operatorLength += 1;
         }
@@ -219,6 +257,8 @@ Query parseQuery(char *rawQuery)
         {
             if (operatorLength && varLength - operatorLength != 1)
             {
+                destroyVar(varHead);
+                destroyOperator(operatorHead);
                 raise(BAD_OPERATOR_INPUT);
             }
         }
@@ -226,18 +266,124 @@ Query parseQuery(char *rawQuery)
         seq = parseOperatorRes.next;
     }
 
-    return (Query){rawQuery, var, operator};
+    return (Query){rawQuery, varHead, operatorHead};
 }
 
 int hydrateQuery(Query query, FILE *source)
 {
+    char line[MAX_LINE];
+    char section[MAX_LINE];
+    int sectionLength = 0;
+    while (fgets(line, sizeof(line), source) != NULL)
+    {
+        char *first = skipSpaces(line);
+        char *last;
+
+        if (strchr(SECTION_START, *first) && (last = strpbrk(first, SECTION_END)))
+        {
+            first += 1;
+            sectionLength = last - first;
+            memcpy(section, first, sizeof(char) * sectionLength);
+            section[sectionLength] = 0;
+            continue;
+        }
+
+        char *varAssignment = strpbrk(first, VAR_ASSIGNMENT);
+        if (!varAssignment)
+        {
+            continue;
+        }
+        if (varAssignment - first)
+        {
+            last = spaceBack(varAssignment - 1);
+        }
+        int keyLength = last - first;
+        Var *var = query.var;
+        while (var)
+        {
+            if (
+                sectionLength != var->sectionLength ||
+                memcmp(section, var->section, sizeof(char) * sectionLength) != 0)
+            {
+                var = var->next;
+                continue;
+            }
+            var->sectionFound = true;
+            if (
+                keyLength != var->keyLength ||
+                memcmp(first, var->key, sizeof(char) * keyLength) != 0)
+            {
+                var = var->next;
+                continue;
+            }
+            var->keyFound = true;
+            char *value = skipSpaces(varAssignment + 1);
+            int valueLength = strlen(value);
+            var->value = malloc(sizeof(char) * valueLength);
+            memcpy(var->value, value, sizeof(char) * valueLength);
+            var = var->next;
+        }
+    }
+    return 0;
 }
 
-char *resolveQuery(Query query)
+char *resolveQuery(Query query, char *output)
 {
-    char *output = malloc(sizeof(char) * 4);
-    strcpy(output, "Out");
-    return output;
+    bool expressionMode = (bool)query.operator;
+
+    int last = 0;
+
+    Var *var = query.var;
+    while (var)
+    {
+        if (!var->sectionFound)
+        {
+            int length = var->sectionLength;
+            char *section = malloc(sizeof(char) * length);
+            memcpy(section, var->section, sizeof(char) * length);
+            section[length] = 0;
+            errorArgument(SECTION_NOT_FOUND, section);
+            free(section);
+            if (expressionMode)
+            {
+                destroyQuery(query);
+                exit(1);
+            }
+            var = var->next;
+            continue;
+        }
+
+        if (!var->keyFound)
+        {
+            int length = var->sectionLength + var->keyLength + 1;
+            char *key = malloc(sizeof(char) * length);
+            memcpy(key, var->section, sizeof(char) * length);
+            key[length] = 0;
+            errorArgument(KEY_NOT_FOUND, key);
+            free(key);
+            if (expressionMode)
+            {
+                destroyQuery(query);
+                exit(1);
+            }
+        }
+
+        if (var->value)
+        {
+            int length = strlen(var->value);
+            memcpy(output + last, var->value, length);
+            last += length;
+        }
+        else
+        {
+            output[last + 1] = *"\n";
+            last += 1;
+        }
+
+        var = var->next;
+    }
+
+    output[last] = 0;
 }
 
 FILE *openForRead(char *path)
@@ -247,6 +393,7 @@ FILE *openForRead(char *path)
     {
         raiseArgument(READ_ERROR, path);
     }
+    return source;
 }
 
 int main(int argc, char *argv[])
@@ -265,10 +412,12 @@ int main(int argc, char *argv[])
     bool lintMode = strcmp(rawQuery, LINT_MODE) == 0;
 
     FILE *source = NULL;
-    char *output = NULL;
+    char output[MAX_OUTPUT];
 
     if (lintMode)
     {
+        source = openForRead(sourcePath);
+        fclose(source);
         // TODO
     }
     else
@@ -276,23 +425,11 @@ int main(int argc, char *argv[])
         Query query = parseQuery(rawQuery);
         source = openForRead(sourcePath);
         hydrateQuery(query, source);
-        output = resolveQuery(query);
+        fclose(source);
+        resolveQuery(query, output);
         destroyQuery(query);
     }
 
-    if (source)
-    {
-        fclose(source);
-    }
-
-    if (output)
-    {
-        printf("%s\n", output);
-        free(output);
-    }
-    else
-    {
-        printf("%s\n", EMPTY_OUTPUT);
-    }
+    printf("%s", output);
     return 0;
 }
