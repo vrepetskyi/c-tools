@@ -190,7 +190,7 @@ ParseVarRes parseVar(Var *head, char *seq, Operator *operator)
 ParseOperatorRes parseOperator(Operator *head, char *seq)
 {
     char *target = seq;
-    if (target && strchr(OPERATORS, *target))
+    if (target && strlen(target) && strchr(OPERATORS, *target))
     {
         Operator *operator= malloc(sizeof(struct Operator));
         operator->value = target;
