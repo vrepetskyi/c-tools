@@ -46,8 +46,6 @@ static const char VAR_ASSIGNMENT[] = "=";
 static const char SECTION_NOT_FOUND[] = "Failed to find section";
 static const char KEY_NOT_FOUND[] = "Failed to find key";
 
-static const int MAX_OUTPUT = 1025;
-
 static const char COMMENT[] = ";";
 
 void raise(const char *errorMessage)
@@ -326,11 +324,19 @@ int hydrateQuery(Query query, FILE *source)
     return 0;
 }
 
-int resolveQuery(Query query, char *output)
+bool isVarNumerical(Var *var)
+{
+    char resString[MAX_LINE];
+    strcpy(resString, var->value);
+    float resNumber = atoi(var->value);
+    char recast[128];
+    sprintf(recast, "%f", resNumber);
+    return strncmp(resString, recast, strlen(resString) - 1) == 0;
+}
+
+int resolveQuery(Query query)
 {
     bool expressionMode = (bool)query.operator;
-
-    int last = 0;
 
     Var *var = query.var;
     while (var)
@@ -367,22 +373,88 @@ int resolveQuery(Query query, char *output)
             }
         }
 
-        if (var->value)
+        if (!expressionMode)
         {
-            int length = strlen(var->value);
-            memcpy(output + last, var->value, length);
-            last += length;
-        }
-        else
-        {
-            output[last + 1] = *"\n";
-            last += 1;
+            printf("%s", var->value ? var->value : "\n");
         }
 
         var = var->next;
     }
 
-    output[last] = 0;
+    if (!expressionMode)
+    {
+        return 0;
+    }
+
+    var = query.var;
+    bool isNumerical = isVarNumerical(var);
+    char resString[MAX_LINE];
+    int last;
+    float resNumber;
+    if (isNumerical)
+    {
+        resNumber = atoi(var->value);
+    }
+    else
+    {
+        last = strlen(var->value) - 1;
+        strncpy(resString, var->value, last);
+    }
+    var = var->next;
+
+    Operator *operator= query.operator;
+    while (operator)
+    {
+        if (isVarNumerical(var) != isNumerical)
+        {
+            fprintf(stderr, "%s\n", "Unable to perform an operation between a string and a number");
+            exit(1);
+        }
+
+        if (isNumerical)
+        {
+            int value = atoi(var->value);
+            switch (operator->value[0])
+            {
+            case '+':
+                resNumber += value;
+                break;
+            case '-':
+                resNumber -= value;
+                break;
+            case '*':
+                resNumber *= value;
+                break;
+            case '/':
+                resNumber /= value;
+                break;
+            }
+        }
+        else
+        {
+            if (operator->value[0] != '+')
+            {
+                fprintf(stderr, "%s\n", "Only \"+\" operation is supported for strings");
+                exit(1);
+            }
+            int length = strlen(var->value) - 1;
+            strncpy(resString + last, var->value, length);
+            last += length;
+        }
+
+        var = var->next;
+        operator= operator->next;
+    }
+
+    if (isNumerical)
+    {
+        printf("%f\n", resNumber);
+    }
+    else
+    {
+        resString[last] = 0;
+        printf("%s\n", resString);
+    }
 
     return 0;
 }
@@ -486,10 +558,8 @@ int main(int argc, char *argv[])
         FILE *source = openForRead(sourcePath);
         hydrateQuery(query, source);
         fclose(source);
-        char output[MAX_OUTPUT];
-        resolveQuery(query, output);
+        resolveQuery(query);
         destroyQuery(query);
-        printf("%s", output);
     }
 
     return 0;
