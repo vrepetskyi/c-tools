@@ -4,21 +4,34 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char NOT_ENOUGH_ARGUMENTS[] = "Not enough arguments";
-static const char TOO_MANY_ARGUMENTS[] = "Too many arguments";
+#define M_LINT_MODE "lint"
+#define M_OPERATORS "+-*/"
+#define M_BAD_ARGUMENTS "Exactly two positional arguments are required:\n1. source file\n2. query/flag \"" M_LINT_MODE "\""
 
-static const char EXPRESSION_MODE[] = "expression";
-static const char LINT_MODE[] = "lint";
+static const int ARGUMENT_NUMBER = 2;
+
+static const char HELP_MESSAGE[] = M_BAD_ARGUMENTS
+    "\n"
+    "\nSingle query either:"
+    "\n1) fetches multiple variables separated by whitespace or \",\""
+    "\n2) performs operations from \"" M_OPERATORS "\" set"
+    "\n"
+    "\nIMPORTANT: all operations are conducted sequentially"
+    "\n(in contradiction to the laws of mathematics)";
+
+static const char LINT_MODE[] = M_LINT_MODE;
+static const char BAD_ARGUMENTS[] = M_BAD_ARGUMENTS;
 
 static const char READ_ERROR[] = "Failed to open file for read";
 
 static const char INNER_DELIMITER[] = ".";
-static const char BAD_VAR_INPUT[] = "Input is not in section.key format";
+static const char BAD_VAR_INPUT[] = "Variable is not in \"section.key\" format";
+static const char MISSING_VAR_INPUT[] = "Variable is missing";
 
-static const char OUTER_DELIMITER[] = "+-*/ ";
+static const char OUTER_DELIMITER[] = M_OPERATORS " ,";
 
-static const char OPERATORS[] = "+-*/";
-static const char BAD_OPERATOR_INPUT[] = "Failed to find an operator in sequence";
+static const char OPERATORS[] = M_OPERATORS;
+static const char BAD_OPERATOR_INPUT[] = "Some operators are missing";
 
 static const char SECTION_NOT_FOUND[] = "Failed to find section";
 static const char KEY_NOT_FOUND[] = "Failed to find key";
@@ -32,41 +45,56 @@ void raise(const char *errorMessage)
     exit(1);
 }
 
-void raiseArgument(const char *errorMessage, char *argument)
+void raiseArgument(const char *errorMessage, const char *argument)
 {
+    if (!strlen(argument))
+    {
+        raise(errorMessage);
+    }
     fprintf(stderr, "%s: \"%s\"\n", errorMessage, argument);
     exit(1);
 }
 
-typedef struct var
+typedef struct Var
 {
     char *section;
     int sectionLength;
     char *key;
     int keyLength;
     char *value;
-    struct var *next;
-} var;
+    struct Var *next;
+} Var;
 
-typedef struct parseVarRes
+int destroyVar(Var *var)
 {
-    var *var;
-    char *next;
-} parseVarRes;
+    if (var->next)
+    {
+        destroyVar(var->next);
+    }
+    free(var->value);
+    free(var);
+    return 0;
+}
 
-char *skipSpace(char *seq)
+char *skipSpaces(char *seq)
 {
     char *nonSpace = seq;
-    while (isspace(*nonSpace))
+    while (nonSpace && isspace(*nonSpace))
     {
         nonSpace += 1;
     }
     return nonSpace;
 }
 
-parseVarRes parseVar(char *seq, var *head)
+typedef struct ParseVarRes
 {
-    var *var = malloc(sizeof(struct var));
+    Var *var;
+    char *next;
+} ParseVarRes;
+
+ParseVarRes parseVar(Var *head, char *seq)
+{
+    Var *var = malloc(sizeof(struct Var));
     if (head)
     {
         head->next = var;
@@ -78,7 +106,14 @@ parseVarRes parseVar(char *seq, var *head)
     if (!innerDelimiter)
     {
         destroyVar(var);
-        raiseArgument(BAD_VAR_INPUT, sectionStart);
+        if (strlen(sectionStart))
+        {
+            raiseArgument(BAD_VAR_INPUT, sectionStart);
+        }
+        else
+        {
+            raise(MISSING_VAR_INPUT);
+        }
     }
     var->section = sectionStart;
     var->sectionLength = innerDelimiter - sectionStart;
@@ -88,62 +123,169 @@ parseVarRes parseVar(char *seq, var *head)
     var->key = keyStart;
     var->keyLength = outerDelimiter ? outerDelimiter - keyStart : strlen(keyStart);
 
-    parseVarRes res = {var, outerDelimiter};
-    return res;
+    return (ParseVarRes){var, outerDelimiter};
 }
 
-typedef struct parseOperatorRes
+typedef struct Operator
 {
-    char *operator;
-    char *next;
-} parseOperatorRes;
+    char *value;
+    struct Operator *next;
+} Operator;
 
-parseOperatorRes parseOperator(char *seq)
+int destroyOperator(Operator *operator)
 {
-}
-
-int destroyVar(var *var)
-{
-    if (var->next)
+    if (operator->next)
     {
-        destroyVar(var->next);
+        destroyOperator(operator->next);
+    }
+    free(operator);
+    return 0;
+}
+
+typedef struct ParseOperatorRes
+{
+    Operator *operator;
+    char *next;
+} ParseOperatorRes;
+
+ParseOperatorRes parseOperator(Operator *head, char *seq)
+{
+    char *target = seq;
+    if (!target)
+    {
+        return (ParseOperatorRes){NULL, target};
+    }
+    if (strchr(OPERATORS, *target))
+    {
+        Operator *operator= malloc(sizeof(struct Operator));
+        operator->value = target;
+        if (head)
+        {
+            head->next = operator;
+        }
+        return (ParseOperatorRes){operator, target + 1 };
+    }
+}
+
+typedef struct Query
+{
+    char *raw;
+    Var *var;
+    Operator *operator;
+} Query;
+
+int destroyQuery(Query query)
+{
+    if (query.var)
+    {
+        destroyVar(query.var);
+    }
+    if (query.operator)
+    {
+        destroyOperator(query.operator);
+    }
+    return 0;
+}
+
+Query parseQuery(char *rawQuery)
+{
+    char *seq = rawQuery;
+    Var *var = NULL;
+    int varLength = 0;
+    Operator *operator= NULL;
+    int operatorLength = 0;
+
+    while (seq)
+    {
+        seq = skipSpaces(seq);
+
+        ParseVarRes parseVarRes = parseVar(var, seq);
+        if (!var)
+        {
+            var = parseVarRes.var;
+        }
+        varLength += 1;
+
+        ParseOperatorRes parseOperatorRes = parseOperator(operator, skipSpaces(parseVarRes.next));
+        if (parseOperatorRes.operator)
+        {
+            if (!operator)
+            {
+                operator= parseOperatorRes.operator;
+            }
+            operatorLength += 1;
+        }
+        else
+        {
+            if (operatorLength && varLength - operatorLength != 1)
+            {
+                raise(BAD_OPERATOR_INPUT);
+            }
+        }
+
+        seq = parseOperatorRes.next;
     }
 
-    free(var->value);
-    free(var);
+    Query query = {rawQuery, var, operator};
+    return query;
+}
 
-    return 0;
+int hydrateQuery(Query query, FILE *source)
+{
+}
+
+char *resolveQuery(Query query)
+{
+    char *output = malloc(sizeof(char) * 4);
+    strcpy(output, "Out");
+    return output;
 }
 
 int main(int argc, char *argv[])
 {
-    if (argc < 3)
+    if (argc < ARGUMENT_NUMBER + 1)
     {
-        raise(NOT_ENOUGH_ARGUMENTS);
+        printf("%s\n", HELP_MESSAGE);
+        return 0;
+    }
+    if (argc > ARGUMENT_NUMBER + 1)
+    {
+        raise(BAD_ARGUMENTS);
+    }
+    char *sourcePath = argv[1];
+    char *rawQuery = argv[2];
+    bool lintMode = strcmp(rawQuery, LINT_MODE) == 0;
+
+    Query query;
+    if (!lintMode)
+    {
+        query = parseQuery(rawQuery);
     }
 
-    bool isExpression = strcmp(argv[2], EXPRESSION_MODE) == 0;
-    bool isLint = strcmp(argv[2], LINT_MODE) == 0;
-
-    if (argc > 3 && !isExpression || argc > 4)
-    {
-        raise(TOO_MANY_ARGUMENTS);
-    }
-
-    parseVarRes x = parseVar(skipSpace(argv[2]), NULL);
-    printf("%s %s\n", x.var->section, x.var->key);
-    destroyVar(x.var);
-
-    x = parseVar(x.next, NULL);
-    printf("%s %s\n", x.var->section, x.var->key);
-    destroyVar(x.var);
-
-    FILE *source = fopen(argv[1], "r");
+    FILE *source = fopen(sourcePath, "r");
     if (source == NULL)
     {
-        raiseArgument(READ_ERROR, argv[1]);
+        raiseArgument(READ_ERROR, sourcePath);
+    }
+
+    char *output;
+    if (lintMode)
+    {
+        // TODO: lint
+    }
+    else
+    {
+        hydrateQuery(query, source);
     }
     fclose(source);
 
+    if (!lintMode)
+    {
+        output = resolveQuery(query);
+    }
+    destroyQuery(query);
+
+    printf("%s\n", output);
+    free(output);
     return 0;
 }
