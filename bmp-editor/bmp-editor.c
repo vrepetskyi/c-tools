@@ -213,7 +213,7 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
 
     int_fast32_t rowLength = floor((24 * infoHeader.biWidth + 31) / 32) * 4;
     int_fast32_t maxEncodingLength = rowLength * infoHeader.biHeight;
-    char *decoded = malloc(sizeof(char) * (maxEncodingLength + 1));
+    char *decoded = malloc(maxEncodingLength + 1);
 
     if (textToEncode && strlen(textToEncode) > maxEncodingLength)
         throw("Image is too small to contain the whole text", &refs);
@@ -222,7 +222,9 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     Hist16Bins histGreen = {"Green", {0}};
     Hist16Bins histRed = {"Red", {0}};
 
-    uint8_t blue, green, red;
+    uint8_t blue, green, red, value;
+    uint_fast32_t bits = 0;
+    char *nextToEncode = textToEncode;
     for (int_fast32_t r = 0; r < infoHeader.biHeight; r++)
     {
         if (!refs.output)
@@ -274,6 +276,25 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
         else
         {
             // Encode
+            for (int_fast32_t c = 0; c < rowLength; c++)
+            {
+                uint8_t bit = bits % 8;
+                uint8_t byte = bits / 8;
+                fread(&value, 1, 1, refs.input);
+                // Modify least significant bit while there is data to encode
+                if (byte == 0 || textToEncode[byte - 1] != '\0' || bit != 0)
+                {
+                    // Get particular bit of text
+                    if ((textToEncode[byte] & (1 << bit)) >> bit)
+                        // Set least significant bit to 1
+                        value = value | 0X01;
+                    else
+                        // Set least significant bit to 0
+                        value = value & 0XFE;
+                    bits++;
+                }
+                fwrite(&value, 1, 1, refs.output);
+            }
         }
     }
 
