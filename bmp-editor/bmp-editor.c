@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -36,6 +37,11 @@ typedef struct tagBITMAPINFOHEADER
 BITMAPFILEHEADER *getFileHeader(FILE *stream)
 {
     BITMAPFILEHEADER *header = malloc(sizeof(BITMAPFILEHEADER));
+    if (!header)
+    {
+        fprintf(stderr, "Failed to allocate memory");
+        return NULL;
+    }
     fread(&header->bfType, sizeof(WORD), 1, stream);
     fread(&header->bfSize, sizeof(DWORD), 1, stream);
     fread(&header->bfReserved1, sizeof(WORD), 1, stream);
@@ -47,6 +53,11 @@ BITMAPFILEHEADER *getFileHeader(FILE *stream)
 BITMAPINFOHEADER *getInfoHeader(FILE *stream)
 {
     BITMAPINFOHEADER *header = malloc(sizeof(BITMAPINFOHEADER));
+    if (!header)
+    {
+        fprintf(stderr, "Failed to allocate memory");
+        return NULL;
+    }
     fread(&header->biSize, sizeof(DWORD), 1, stream);
     fread(&header->biWidth, sizeof(LONG), 1, stream);
     fread(&header->biHeight, sizeof(LONG), 1, stream);
@@ -107,10 +118,28 @@ void printInfoHeader(BITMAPINFOHEADER *header)
 typedef struct Hist16Bins
 {
     char *name;
-    DWORD bins[16];
+    uint_fast32_t bins[16];
 } Hist16Bins;
 
-int main(int argc, char *argv[])
+void printHist16Bins(Hist16Bins *hist)
+{
+    printf("%s:\n", hist->name);
+
+    uint_fast32_t sum = 0;
+    for (uint_fast8_t i = 0; i < 16; i++)
+    {
+        sum += hist->bins[i];
+    }
+
+    for (uint_fast8_t i = 0; i < 16; i++)
+    {
+        const char *format = (i < 7) ? "\t%d-%d:\t\t\t%.2f%%\n" : "\t%d-%d:\t\t%.2f%%\n";
+        float percent = (sum > 0) ? (hist->bins[i] * 100 / sum) : 0;
+        printf(format, 16 * i, 16 * (i + 1) - 1, percent);
+    }
+}
+
+uint_fast8_t main(uint_fast8_t argc, char *argv[])
 {
     char *inputPath = NULL;
     char *outputPath = NULL;
@@ -126,14 +155,14 @@ int main(int argc, char *argv[])
         inputPath = argv[1];
         break;
     default:
-        printf("%s", "Incorrect arguments");
+        printf("Incorrect arguments");
         return 1;
     }
 
     FILE *input = fopen(inputPath, "r");
     if (!input)
     {
-        fprintf(stderr, "%s", "Failed to open input file");
+        fprintf(stderr, "Failed to open input file");
         return 1;
     }
 
@@ -143,29 +172,106 @@ int main(int argc, char *argv[])
         output = fopen(outputPath, "w");
         if (!output)
         {
-            fprintf(stderr, "%s", "Failed to open output file");
+            fclose(input);
+            fprintf(stderr, "Failed to open output file");
             return 1;
         }
     }
 
     BITMAPFILEHEADER *fileHeader = getFileHeader(input);
+    if (!fileHeader)
+    {
+        fclose(input);
+        if (output)
+        {
+            fclose(output);
+        }
+    }
     bool isBitmap = fileHeader->bfType == 0x4D42;
     printFileHeader(fileHeader, isBitmap);
     if (!isBitmap)
     {
-        fprintf(stderr, "%s", "Input file is not a bitmap");
+        free(fileHeader);
+        fclose(input);
+        if (output)
+        {
+            fclose(output);
+        }
+        fprintf(stderr, "Input file is not a bitmap");
         return 1;
     }
 
     BITMAPINFOHEADER *infoHeader = getInfoHeader(input);
+    if (!infoHeader)
+    {
+        free(fileHeader);
+        fclose(input);
+        fclose(output);
+    }
     printInfoHeader(infoHeader);
     if (infoHeader->biBitCount != 24 || infoHeader->biCompression != 0)
     {
-        fprintf(stderr, "%s", "Further operations are only supported for uncompressed 24-bit files");
+        free(fileHeader);
+        free(infoHeader);
+        fclose(input);
+        if (output)
+        {
+            fclose(output);
+        }
+        fprintf(stderr, "Further operations are only supported for uncompressed 24-bit files");
         return 1;
     }
 
+    fseek(input, fileHeader->bfOffBits, 0);
+
+    Hist16Bins histBlue = {"Blue", {0}};
+    Hist16Bins histGreen = {"Green", {0}};
+    Hist16Bins histRed = {"Red", {0}};
+
+    int_fast32_t rowLength = floor((24 * infoHeader->biWidth + 31) / 32) * 4;
+    uint8_t *row = malloc(sizeof(uint8_t) * rowLength);
+    for (int_fast32_t r = 0; r < infoHeader->biHeight; r++)
+    {
+        if (!row)
+        {
+            free(fileHeader);
+            free(infoHeader);
+            free(row);
+            fclose(input);
+            if (output)
+            {
+                fclose(output);
+            }
+            fprintf(stderr, "Failed to allocate memory");
+            return 1;
+        }
+        for (int_fast32_t c = 0; c < rowLength; c++)
+        {
+            fread(&row[c], sizeof(uint8_t), 1, input);
+        }
+        for (int_fast32_t p = 0; p < infoHeader->biWidth; p++)
+        {
+            uint_fast8_t blue = row[p * 3];
+            uint_fast8_t green = row[p * 3 + 1];
+            uint_fast8_t red = row[p * 3 + 2];
+
+            histBlue.bins[blue / 16]++;
+            histGreen.bins[green / 16]++;
+            histRed.bins[red / 16]++;
+        }
+    }
+    free(row);
+
+    printHist16Bins(&histBlue);
+    printHist16Bins(&histGreen);
+    printHist16Bins(&histRed);
+
     free(fileHeader);
     free(infoHeader);
+    fclose(input);
+    if (output)
+    {
+        fclose(output);
+    }
     return 0;
 }
