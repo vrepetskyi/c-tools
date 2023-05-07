@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-const uint8_t PADDING = 0;
-
 typedef uint16_t WORD;
 typedef uint32_t DWORD;
 typedef int32_t LONG;
@@ -80,16 +78,17 @@ void initInfoHeader(BITMAPINFOHEADER *header, FILE *stream)
     fread(&header->biClrImportant, 4, 1, stream);
 }
 
-void printFileHeader(BITMAPFILEHEADER *header, bool isBitmap)
+void printFileHeader(BITMAPFILEHEADER *header)
 {
     printf("BITMAPFILEHEADER:\n"
-           "\tbfType:\t\t\t0x%X (%s)\n"
+           "\tbfType:\t\t\t0x%X (%c%c)\n"
            "\tbfSize:\t\t\t%d\n"
            "\tbfReserved1:\t\t0x%X\n"
            "\tbfReserved2:\t\t0x%X\n"
            "\tbfOffBits:\t\t%d\n",
            header->bfType,
-           isBitmap ? "BM" : "!BM",
+           header->bfType,
+           header->bfType >> 8,
            header->bfSize,
            header->bfReserved1,
            header->bfReserved2,
@@ -149,12 +148,9 @@ void printHist16Bins(Hist16Bins *hist)
 
 uint_fast8_t main(uint_fast8_t argc, char *argv[])
 {
-    Refs refs = {};
-
     char *inputPath = NULL;
     char *outputPath = NULL;
     char *textToEncode = NULL;
-    bool decode = false;
 
     switch (argc)
     {
@@ -166,8 +162,11 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
         inputPath = argv[1];
         break;
     default:
-        throw("Incorrect arguments", &refs);
+        fprintf(stderr, "Incorrect arguments");
+        return 1;
     }
+
+    Refs refs = {};
 
     refs.input = fopen(inputPath, "r");
     if (!refs.input)
@@ -182,50 +181,54 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
 
     BITMAPFILEHEADER fileHeader;
     initFileHeader(&fileHeader, refs.input);
-    bool isBitmap = fileHeader.bfType == 0x4D42;
-    printFileHeader(&fileHeader, isBitmap);
-    if (!isBitmap)
+    printFileHeader(&fileHeader);
+
+    if (fileHeader.bfType != 0x4D42)
         throw("Input file is not a bitmap", &refs);
 
     BITMAPINFOHEADER infoHeader;
     initInfoHeader(&infoHeader, refs.input);
     printInfoHeader(&infoHeader);
+
     if (infoHeader.biBitCount != 24 || infoHeader.biCompression != 0)
         throw("Further operations are only supported for uncompressed 24-bit files", &refs);
 
-    if (refs.output)
+    int_fast32_t rowLength = floor((24 * infoHeader.biWidth + 31) / 32) * 4;
+    int_fast32_t maxEncodingLength = rowLength * infoHeader.biHeight;
+
+    if (textToEncode && strlen(textToEncode) > maxEncodingLength)
+        throw("Image is too small to contain the whole text", &refs);
+
+    bool decode;
+    if (!refs.output)
     {
-        fseek(refs.input, 0, SEEK_SET);
-        void *headers = malloc(fileHeader.bfOffBits);
-        if (!headers)
-            throw("Failed to allocate memory", &refs);
-        fread(headers, fileHeader.bfOffBits, 1, refs.input);
-        fwrite(headers, fileHeader.bfOffBits, 1, refs.output);
-        free(headers);
-    }
-    else
-    {
+        // Histogram or decode - jump to the data
         fseek(refs.input, fileHeader.bfOffBits, SEEK_SET);
         printf("\nDecode steganography? [y/N]: ");
         decode = fgetc(stdin) == 121;
         printf("\n");
     }
-
-    int_fast32_t rowLength = floor((24 * infoHeader.biWidth + 31) / 32) * 4;
-    int_fast32_t maxEncodingLength = rowLength * infoHeader.biHeight;
-    char *decoded = malloc(maxEncodingLength + 1);
-    decoded[maxEncodingLength] = '\0';
-
-    if (textToEncode && strlen(textToEncode) > maxEncodingLength)
-        throw("Image is too small to contain the whole text", &refs);
+    else
+    {
+        // Grayscale or encode - copy headers; end up at the data beginning
+        fseek(refs.input, 0, SEEK_SET);
+        void *headers = malloc(fileHeader.bfOffBits);
+        if (!headers)
+            throw("Failed to allocate memory for new file headers", &refs);
+        fread(headers, fileHeader.bfOffBits, 1, refs.input);
+        fwrite(headers, fileHeader.bfOffBits, 1, refs.output);
+        free(headers);
+    }
 
     Hist16Bins histBlue = {"Blue", {0}};
     Hist16Bins histGreen = {"Green", {0}};
     Hist16Bins histRed = {"Red", {0}};
 
+    char *decoded = malloc(maxEncodingLength + 1);
+    decoded[maxEncodingLength] = '\0';
+
     uint8_t blue, green, red, value;
     uint_fast32_t bits = 0;
-    char *nextToEncode = textToEncode;
     for (int_fast32_t r = 0; r < infoHeader.biHeight; r++)
     {
         if (!refs.output)
@@ -287,8 +290,8 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
             }
             for (uint_fast8_t p = 0; p < rowLength - infoHeader.biWidth * 3; p++)
             {
-                fseek(refs.input, 1, SEEK_CUR);
-                fwrite(&PADDING, 1, 1, refs.output);
+                fread(&value, 1, 1, refs.input);
+                fwrite(&value, 1, 1, refs.output);
             }
         }
         else
