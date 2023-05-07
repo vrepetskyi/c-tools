@@ -58,26 +58,26 @@ void throw(char *error, Refs *refs)
 
 void initFileHeader(BITMAPFILEHEADER *header, FILE *stream)
 {
-    fread(&header->bfType, sizeof(WORD), 1, stream);
-    fread(&header->bfSize, sizeof(DWORD), 1, stream);
-    fread(&header->bfReserved1, sizeof(WORD), 1, stream);
-    fread(&header->bfReserved2, sizeof(WORD), 1, stream);
-    fread(&header->bfOffBits, sizeof(DWORD), 1, stream);
+    fread(&header->bfType, 2, 1, stream);
+    fread(&header->bfSize, 4, 1, stream);
+    fread(&header->bfReserved1, 2, 1, stream);
+    fread(&header->bfReserved2, 2, 1, stream);
+    fread(&header->bfOffBits, 4, 1, stream);
 }
 
 void initInfoHeader(BITMAPINFOHEADER *header, FILE *stream)
 {
-    fread(&header->biSize, sizeof(DWORD), 1, stream);
-    fread(&header->biWidth, sizeof(LONG), 1, stream);
-    fread(&header->biHeight, sizeof(LONG), 1, stream);
-    fread(&header->biPlanes, sizeof(WORD), 1, stream);
-    fread(&header->biBitCount, sizeof(WORD), 1, stream);
-    fread(&header->biCompression, sizeof(DWORD), 1, stream);
-    fread(&header->biSizeImage, sizeof(DWORD), 1, stream);
-    fread(&header->biXPelsPerMeter, sizeof(LONG), 1, stream);
-    fread(&header->biYPelsPerMeter, sizeof(LONG), 1, stream);
-    fread(&header->biClrUsed, sizeof(DWORD), 1, stream);
-    fread(&header->biClrImportant, sizeof(DWORD), 1, stream);
+    fread(&header->biSize, 4, 1, stream);
+    fread(&header->biWidth, 4, 1, stream);
+    fread(&header->biHeight, 4, 1, stream);
+    fread(&header->biPlanes, 2, 1, stream);
+    fread(&header->biBitCount, 2, 1, stream);
+    fread(&header->biCompression, 4, 1, stream);
+    fread(&header->biSizeImage, 4, 1, stream);
+    fread(&header->biXPelsPerMeter, 4, 1, stream);
+    fread(&header->biYPelsPerMeter, 4, 1, stream);
+    fread(&header->biClrUsed, 4, 1, stream);
+    fread(&header->biClrImportant, 4, 1, stream);
 }
 
 void printFileHeader(BITMAPFILEHEADER *header, bool isBitmap)
@@ -195,7 +195,7 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
 
     if (refs.output)
     {
-        fseek(refs.input, 0, 0);
+        fseek(refs.input, 0, SEEK_SET);
         void *headers = malloc(fileHeader.bfOffBits);
         if (!headers)
             throw("Failed to allocate memory", &refs);
@@ -205,68 +205,77 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     }
     else
     {
+        fseek(refs.input, fileHeader.bfOffBits, SEEK_SET);
         printf("\nDecode steganography? [y/N]: ");
         decode = fgetc(stdin) == 121;
         printf("\n");
-        fseek(refs.input, fileHeader.bfOffBits, 0);
     }
 
     int_fast32_t rowLength = floor((24 * infoHeader.biWidth + 31) / 32) * 4;
-    uint8_t *row = malloc(sizeof(uint8_t) * rowLength);
-    if (!row)
-        throw("Failed to allocate memory", &refs);
+    int_fast32_t maxEncodingLength = rowLength * infoHeader.biHeight;
+    char *decoded = malloc(sizeof(char) * (maxEncodingLength + 1));
 
-    if (textToEncode && strlen(textToEncode) > rowLength * infoHeader.biHeight)
+    if (textToEncode && strlen(textToEncode) > maxEncodingLength)
         throw("Image is too small to contain the whole text", &refs);
 
     Hist16Bins histBlue = {"Blue", {0}};
     Hist16Bins histGreen = {"Green", {0}};
     Hist16Bins histRed = {"Red", {0}};
 
+    uint8_t blue, green, red;
     for (int_fast32_t r = 0; r < infoHeader.biHeight; r++)
     {
-        for (int_fast32_t c = 0; c < rowLength; c++)
+        if (!refs.output)
         {
-            fread(&row[c], sizeof(uint8_t), 1, refs.input);
-        }
-        for (int_fast32_t p = 0; p < infoHeader.biWidth; p++)
-        {
-            uint_fast8_t blue = row[p * 3];
-            uint_fast8_t green = row[p * 3 + 1];
-            uint_fast8_t red = row[p * 3 + 2];
+            if (!decode)
+            {
+                // Histogram
+                for (int_fast32_t p = 0; p < infoHeader.biWidth; p++)
+                {
+                    fread(&blue, 1, 1, refs.input);
+                    fread(&green, 1, 1, refs.input);
+                    fread(&red, 1, 1, refs.input);
 
-            if (decode)
-            {
-            }
-            else if (refs.output)
-            {
-                if (textToEncode)
-                {
-                                }
-                else
-                {
-                    uint8_t grayscale = red * 0.299 + green * 0.587 + blue * 0.114;
-                    fwrite(&grayscale, sizeof(uint8_t), 1, refs.output);
-                    fwrite(&grayscale, sizeof(uint8_t), 1, refs.output);
-                    fwrite(&grayscale, sizeof(uint8_t), 1, refs.output);
+                    histBlue.bins[blue / 16]++;
+                    histGreen.bins[green / 16]++;
+                    histRed.bins[red / 16]++;
                 }
-                if (p == infoHeader.biWidth - 1)
+                for (uint_fast8_t p = 0; p < rowLength - infoHeader.biWidth * 3; p++)
                 {
-                    for (uint_fast8_t o = 0; o < rowLength - infoHeader.biWidth * 3; o++)
-                    {
-                        fwrite(&PADDING, sizeof(uint8_t), 1, refs.output);
-                    }
+                    fseek(refs.input, 1, SEEK_CUR);
                 }
             }
             else
             {
-                histBlue.bins[blue / 16]++;
-                histGreen.bins[green / 16]++;
-                histRed.bins[red / 16]++;
+                // Decode
             }
         }
+        else if (!textToEncode)
+        {
+            // Grayscale
+            for (int_fast32_t p = 0; p < infoHeader.biWidth; p++)
+            {
+                fread(&blue, 1, 1, refs.input);
+                fread(&green, 1, 1, refs.input);
+                fread(&red, 1, 1, refs.input);
+
+                uint8_t grayscale = red * 0.299 + green * 0.587 + blue * 0.114;
+
+                fwrite(&grayscale, 1, 1, refs.output);
+                fwrite(&grayscale, 1, 1, refs.output);
+                fwrite(&grayscale, 1, 1, refs.output);
+            }
+            for (uint_fast8_t p = 0; p < rowLength - infoHeader.biWidth * 3; p++)
+            {
+                fseek(refs.input, 1, SEEK_CUR);
+                fwrite(&PADDING, 1, 1, refs.output);
+            }
+        }
+        else
+        {
+            // Encode
+        }
     }
-    free(row);
 
     if (!decode && !refs.output)
     {
