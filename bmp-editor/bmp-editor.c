@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+const uint8_t PADDING = 0;
+
 typedef uint16_t WORD;
 typedef uint32_t DWORD;
 typedef int32_t LONG;
@@ -189,7 +191,18 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     if (infoHeader.biBitCount != 24 || infoHeader.biCompression != 0)
         throw("Further operations are only supported for uncompressed 24-bit files", &refs);
 
-    fseek(refs.input, fileHeader.bfOffBits, 0);
+    if (refs.output)
+    {
+        fseek(refs.input, 0, 0);
+        void *headers = malloc(fileHeader.bfOffBits);
+        if (!headers)
+            throw("Failed to allocate memory", &refs);
+        fread(headers, fileHeader.bfOffBits, 1, refs.input);
+        fwrite(headers, fileHeader.bfOffBits, 1, refs.output);
+        free(headers);
+    }
+    else
+        fseek(refs.input, fileHeader.bfOffBits, 0);
 
     Hist16Bins histBlue = {"Blue", {0}};
     Hist16Bins histGreen = {"Green", {0}};
@@ -214,6 +227,27 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
             histBlue.bins[blue / 16]++;
             histGreen.bins[green / 16]++;
             histRed.bins[red / 16]++;
+
+            if (refs.output)
+            {
+                if (textToEncode)
+                {
+                }
+                else
+                {
+                    uint8_t grayscale = red * 0.299 + green * 0.587 + blue * 0.114;
+                    fwrite(&grayscale, sizeof(uint8_t), 1, refs.output);
+                    fwrite(&grayscale, sizeof(uint8_t), 1, refs.output);
+                    fwrite(&grayscale, sizeof(uint8_t), 1, refs.output);
+                }
+                if (p == infoHeader.biWidth - 1)
+                {
+                    for (uint_fast8_t o = 0; o < rowLength - infoHeader.biWidth * 3; o++)
+                    {
+                        fwrite(&PADDING, sizeof(uint8_t), 1, refs.output);
+                    }
+                }
+            }
         }
     }
     free(row);
