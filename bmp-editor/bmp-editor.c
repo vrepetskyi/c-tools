@@ -214,6 +214,7 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     int_fast32_t rowLength = floor((24 * infoHeader.biWidth + 31) / 32) * 4;
     int_fast32_t maxEncodingLength = rowLength * infoHeader.biHeight;
     char *decoded = malloc(maxEncodingLength + 1);
+    decoded[maxEncodingLength] = '\0';
 
     if (textToEncode && strlen(textToEncode) > maxEncodingLength)
         throw("Image is too small to contain the whole text", &refs);
@@ -250,6 +251,23 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
             else
             {
                 // Decode
+                for (int_fast32_t c = 0; c < rowLength; c++)
+                {
+                    uint8_t bit = bits % 8;
+                    uint8_t byte = bits / 8;
+                    fread(&value, 1, 1, refs.input);
+                    // Set decoded bits unless '\0' is met
+                    if (byte != 0 && decoded[byte - 1] == '\0')
+                        break;
+                    // Get least significant bit from image
+                    if (value & 0X01)
+                        // Set bit to 1
+                        decoded[byte] |= 1 << bit;
+                    else
+                        // Set bit to 0
+                        decoded[byte] &= ~(1 << bit);
+                    bits++;
+                }
             }
         }
         else if (!textToEncode)
@@ -287,10 +305,10 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
                     // Get particular bit of text
                     if ((textToEncode[byte] & (1 << bit)) >> bit)
                         // Set least significant bit to 1
-                        value = value | 0X01;
+                        value |= 0X01;
                     else
                         // Set least significant bit to 0
-                        value = value & 0XFE;
+                        value &= 0XFE;
                     bits++;
                 }
                 fwrite(&value, 1, 1, refs.output);
@@ -298,7 +316,11 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
         }
     }
 
-    if (!decode && !refs.output)
+    if (decode)
+    {
+        printf("%s", decoded);
+    }
+    else if (!refs.output)
     {
         printHist16Bins(&histBlue);
         printHist16Bins(&histGreen);
