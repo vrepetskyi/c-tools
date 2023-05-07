@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 const uint8_t PADDING = 0;
 
@@ -153,6 +154,7 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     char *inputPath = NULL;
     char *outputPath = NULL;
     char *textToEncode = NULL;
+    bool decode = false;
 
     switch (argc)
     {
@@ -202,16 +204,25 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
         free(headers);
     }
     else
+    {
+        printf("\nDecode steganography? [y/N]: ");
+        decode = fgetc(stdin) == 121;
+        printf("\n");
         fseek(refs.input, fileHeader.bfOffBits, 0);
-
-    Hist16Bins histBlue = {"Blue", {0}};
-    Hist16Bins histGreen = {"Green", {0}};
-    Hist16Bins histRed = {"Red", {0}};
+    }
 
     int_fast32_t rowLength = floor((24 * infoHeader.biWidth + 31) / 32) * 4;
     uint8_t *row = malloc(sizeof(uint8_t) * rowLength);
     if (!row)
         throw("Failed to allocate memory", &refs);
+
+    if (textToEncode && strlen(textToEncode) > rowLength * infoHeader.biHeight)
+        throw("Image is too small to contain the whole text", &refs);
+
+    Hist16Bins histBlue = {"Blue", {0}};
+    Hist16Bins histGreen = {"Green", {0}};
+    Hist16Bins histRed = {"Red", {0}};
+
     for (int_fast32_t r = 0; r < infoHeader.biHeight; r++)
     {
         for (int_fast32_t c = 0; c < rowLength; c++)
@@ -224,15 +235,14 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
             uint_fast8_t green = row[p * 3 + 1];
             uint_fast8_t red = row[p * 3 + 2];
 
-            histBlue.bins[blue / 16]++;
-            histGreen.bins[green / 16]++;
-            histRed.bins[red / 16]++;
-
-            if (refs.output)
+            if (decode)
+            {
+            }
+            else if (refs.output)
             {
                 if (textToEncode)
                 {
-                }
+                                }
                 else
                 {
                     uint8_t grayscale = red * 0.299 + green * 0.587 + blue * 0.114;
@@ -248,13 +258,22 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
                     }
                 }
             }
+            else
+            {
+                histBlue.bins[blue / 16]++;
+                histGreen.bins[green / 16]++;
+                histRed.bins[red / 16]++;
+            }
         }
     }
     free(row);
 
-    printHist16Bins(&histBlue);
-    printHist16Bins(&histGreen);
-    printHist16Bins(&histRed);
+    if (!decode && !refs.output)
+    {
+        printHist16Bins(&histBlue);
+        printHist16Bins(&histGreen);
+        printHist16Bins(&histRed);
+    }
 
     freeRefs(&refs);
     return 0;
