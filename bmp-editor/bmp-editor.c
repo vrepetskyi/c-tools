@@ -8,7 +8,6 @@ typedef uint16_t WORD;
 typedef uint32_t DWORD;
 typedef int32_t LONG;
 
-// https://docs.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapfileheader
 typedef struct tagBITMAPFILEHEADER
 {
     WORD bfType;
@@ -16,9 +15,8 @@ typedef struct tagBITMAPFILEHEADER
     WORD bfReserved1;
     WORD bfReserved2;
     DWORD bfOffBits;
-} BITMAPFILEHEADER, *LPBITMAPFILEHEADER, *PBITMAPFILEHEADER;
+} BITMAPFILEHEADER;
 
-// https://docs.microsoft.com/pl-pl/previous-versions/dd183376(v=vs.85)
 typedef struct tagBITMAPINFOHEADER
 {
     DWORD biSize;
@@ -32,59 +30,40 @@ typedef struct tagBITMAPINFOHEADER
     LONG biYPelsPerMeter;
     DWORD biClrUsed;
     DWORD biClrImportant;
-} BITMAPINFOHEADER, *LPBITMAPINFOHEADER, *PBITMAPINFOHEADER;
+} BITMAPINFOHEADER;
 
-typedef struct References
+typedef struct Refs
 {
     FILE *input;
     FILE *output;
-    BITMAPFILEHEADER *fileHeader;
-    BITMAPINFOHEADER *infoHeader;
-} References;
+} Refs;
 
-void freeReferences(References *ref)
+void freeRefs(Refs *refs)
 {
-    if (ref->input)
-        fclose(ref->input);
-    if (ref->output)
-        fclose(ref->output);
-    if (ref->fileHeader)
-        free(ref->fileHeader);
-    if (ref->infoHeader)
-        free(ref->infoHeader);
+    if (refs->input)
+        fclose(refs->input);
+    if (refs->output)
+        fclose(refs->output);
 }
 
-void throw(char *error, References *ref)
+void throw(char *error, Refs *refs)
 {
-    freeReferences(ref);
+    freeRefs(refs);
     fprintf(stderr, "%s", error);
     exit(1);
 }
 
-BITMAPFILEHEADER *setFileHeader(References *ref)
+void initFileHeader(BITMAPFILEHEADER *header, FILE *stream)
 {
-    BITMAPFILEHEADER *header = malloc(sizeof(BITMAPFILEHEADER));
-    if (!header)
-    {
-        throw("Failed to allocate memory", ref);
-    }
-    FILE *stream = ref->input;
     fread(&header->bfType, sizeof(WORD), 1, stream);
     fread(&header->bfSize, sizeof(DWORD), 1, stream);
     fread(&header->bfReserved1, sizeof(WORD), 1, stream);
     fread(&header->bfReserved2, sizeof(WORD), 1, stream);
     fread(&header->bfOffBits, sizeof(DWORD), 1, stream);
-    ref->fileHeader = header;
 }
 
-BITMAPINFOHEADER *setInfoHeader(References *ref)
+void initInfoHeader(BITMAPINFOHEADER *header, FILE *stream)
 {
-    BITMAPINFOHEADER *header = malloc(sizeof(BITMAPINFOHEADER));
-    if (!header)
-    {
-        throw("Failed to allocate memory", ref);
-    }
-    FILE *stream = ref->input;
     fread(&header->biSize, sizeof(DWORD), 1, stream);
     fread(&header->biWidth, sizeof(LONG), 1, stream);
     fread(&header->biHeight, sizeof(LONG), 1, stream);
@@ -96,7 +75,6 @@ BITMAPINFOHEADER *setInfoHeader(References *ref)
     fread(&header->biYPelsPerMeter, sizeof(LONG), 1, stream);
     fread(&header->biClrUsed, sizeof(DWORD), 1, stream);
     fread(&header->biClrImportant, sizeof(DWORD), 1, stream);
-    ref->infoHeader = header;
 }
 
 void printFileHeader(BITMAPFILEHEADER *header, bool isBitmap)
@@ -117,7 +95,7 @@ void printFileHeader(BITMAPFILEHEADER *header, bool isBitmap)
 
 void printInfoHeader(BITMAPINFOHEADER *header)
 {
-    printf("BITMAPFILEHEADER:\n"
+    printf("BITMAPINFOHEADER:\n"
            "\tbiSize:\t\t\t%d\n"
            "\tbiWidth:\t\t%d\n"
            "\tbiHeight:\t\t%d\n"
@@ -168,7 +146,7 @@ void printHist16Bins(Hist16Bins *hist)
 
 uint_fast8_t main(uint_fast8_t argc, char *argv[])
 {
-    References ref = {};
+    Refs refs = {};
 
     char *inputPath = NULL;
     char *outputPath = NULL;
@@ -184,48 +162,50 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
         inputPath = argv[1];
         break;
     default:
-        throw("Incorrect arguments", &ref);
+        throw("Incorrect arguments", &refs);
     }
 
-    ref.input = fopen(inputPath, "r");
-    if (!ref.input)
-        throw("Failed to open input file", &ref);
+    refs.input = fopen(inputPath, "r");
+    if (!refs.input)
+        throw("Failed to open input file", &refs);
 
     if (outputPath)
     {
-        ref.output = fopen(outputPath, "w");
-        if (!ref.output)
-            throw("Failed to open output file", &ref);
+        refs.output = fopen(outputPath, "w");
+        if (!refs.output)
+            throw("Failed to open output file", &refs);
     }
 
-    setFileHeader(&ref);
-    bool isBitmap = ref.fileHeader->bfType == 0x4D42;
-    printFileHeader(ref.fileHeader, isBitmap);
+    BITMAPFILEHEADER fileHeader;
+    initFileHeader(&fileHeader, refs.input);
+    bool isBitmap = fileHeader.bfType == 0x4D42;
+    printFileHeader(&fileHeader, isBitmap);
     if (!isBitmap)
-        throw("Input file is not a bitmap", &ref);
+        throw("Input file is not a bitmap", &refs);
 
-    setInfoHeader(&ref);
-    printInfoHeader(ref.infoHeader);
-    if (ref.infoHeader->biBitCount != 24 || ref.infoHeader->biCompression != 0)
-        throw("Further operations are only supported for uncompressed 24-bit files", &ref);
+    BITMAPINFOHEADER infoHeader;
+    initInfoHeader(&infoHeader, refs.input);
+    printInfoHeader(&infoHeader);
+    if (infoHeader.biBitCount != 24 || infoHeader.biCompression != 0)
+        throw("Further operations are only supported for uncompressed 24-bit files", &refs);
 
-    fseek(ref.input, ref.fileHeader->bfOffBits, 0);
+    fseek(refs.input, fileHeader.bfOffBits, 0);
 
     Hist16Bins histBlue = {"Blue", {0}};
     Hist16Bins histGreen = {"Green", {0}};
     Hist16Bins histRed = {"Red", {0}};
 
-    int_fast32_t rowLength = floor((24 * ref.infoHeader->biWidth + 31) / 32) * 4;
+    int_fast32_t rowLength = floor((24 * infoHeader.biWidth + 31) / 32) * 4;
     uint8_t *row = malloc(sizeof(uint8_t) * rowLength);
     if (!row)
-        throw("Failed to allocate memory", &ref);
-    for (int_fast32_t r = 0; r < ref.infoHeader->biHeight; r++)
+        throw("Failed to allocate memory", &refs);
+    for (int_fast32_t r = 0; r < infoHeader.biHeight; r++)
     {
         for (int_fast32_t c = 0; c < rowLength; c++)
         {
-            fread(&row[c], sizeof(uint8_t), 1, ref.input);
+            fread(&row[c], sizeof(uint8_t), 1, refs.input);
         }
-        for (int_fast32_t p = 0; p < ref.infoHeader->biWidth; p++)
+        for (int_fast32_t p = 0; p < infoHeader.biWidth; p++)
         {
             uint_fast8_t blue = row[p * 3];
             uint_fast8_t green = row[p * 3 + 1];
@@ -242,6 +222,6 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     printHist16Bins(&histGreen);
     printHist16Bins(&histRed);
 
-    freeReferences(&ref);
+    freeRefs(&refs);
     return 0;
 }
