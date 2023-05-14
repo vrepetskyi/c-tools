@@ -1,3 +1,5 @@
+#include <complex.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,6 +14,7 @@
 #define PALETTE_COLORS (1 << BITS_PER_PIXEL)
 #define PALETTE_BYTES 4
 #define PIXELS_PER_METRE 11812
+#define MAX_ITERATIONS 512
 
 const uint_fast8_t ZERO = 0;
 
@@ -62,13 +65,37 @@ void writeHeaders(uint_fast32_t width, uint_fast32_t height, uint_fast32_t rowLe
     writeGrayscalePalette(target);
 }
 
-void writeFractal(uint_fast32_t width, uint_fast32_t height, uint_fast32_t rowLength, FILE *target)
+uint_fast16_t getIterations(uint_fast32_t width, uint_fast32_t height, uint_fast32_t x, uint_fast32_t y)
 {
-    for (uint_fast32_t l = 0; l < height; l++)
+    double mappedX = (double)x * 3 / width - 2;
+    double mappedY = (double)y * 2 / height - 1;
+    double complex c = mappedX + mappedY * I;
+    double complex z = 0 + 0 * I;
+    for (uint_fast16_t i = 0; i < MAX_ITERATIONS; i++)
     {
-        for (uint_fast32_t p = 0; p < width; p++)
+        z = z * z + c;
+        if (abs(creal(z)) > 2)
         {
-            fwrite(&p, 1, 1, target);
+            return i + 1;
+        }
+    }
+    return MAX_ITERATIONS;
+}
+
+uint_fast8_t mapIterationsToColor(uint_fast16_t iterations)
+{
+    return (float)iterations / MAX_ITERATIONS * 255;
+}
+
+void writePixels(uint_fast32_t width, uint_fast32_t height, uint_fast32_t rowLength, FILE *target)
+{
+    for (uint_fast32_t y = 0; y < height; y++)
+    {
+        for (uint_fast32_t x = 0; x < width; x++)
+        {
+            uint_fast16_t iterations = getIterations(width, height, x, y);
+            uint_fast8_t color = mapIterationsToColor(iterations);
+            fwrite(&color, 1, 1, target);
         }
         for (uint_fast8_t p = 0; p < rowLength - width; p++)
         {
@@ -102,7 +129,7 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
 
     uint_fast32_t rowLength = ceil(BITS_PER_PIXEL * width / 32) * 4;
     writeHeaders(width, height, rowLength, output);
-    writeFractal(width, height, rowLength, output);
+    writePixels(width, height, rowLength, output);
 
     fclose(output);
     return 0;
