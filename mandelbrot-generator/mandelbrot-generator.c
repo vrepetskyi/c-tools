@@ -14,7 +14,6 @@
 #define PALETTE_COLORS (1 << BITS_PER_PIXEL)
 #define PALETTE_BYTES 4
 #define PIXELS_PER_METRE 11812
-#define MAX_ITERATIONS 512
 
 const uint_fast8_t ZERO = 0;
 
@@ -65,36 +64,36 @@ void writeHeaders(uint_fast32_t width, uint_fast32_t height, uint_fast32_t rowLe
     writeGrayscalePalette(target);
 }
 
-uint_fast16_t getIterations(uint_fast32_t width, uint_fast32_t height, uint_fast32_t x, uint_fast32_t y)
+uint_fast16_t getIterations(uint_fast32_t width, uint_fast32_t height, uint_fast32_t x, uint_fast32_t y, uint_fast16_t maxIterations)
 {
     double mappedX = (double)x * 3 / width - 2;
     double mappedY = (double)y * 2 / height - 1;
     double complex c = mappedX + mappedY * I;
-    double complex z = 0 + 0 * I;
-    for (uint_fast16_t i = 0; i < MAX_ITERATIONS; i++)
+    double complex z = 0;
+    for (uint_fast16_t i = 0; i < maxIterations; i++)
     {
         z = z * z + c;
-        if (abs(creal(z)) > 2)
+        if (abs(z) > 2)
         {
-            return i + 1;
+            return i;
         }
     }
-    return MAX_ITERATIONS;
+    return maxIterations;
 }
 
-uint_fast8_t mapIterationsToColor(uint_fast16_t iterations)
+uint_fast8_t mapIterationsToColor(uint_fast16_t n, uint_fast16_t max)
 {
-    return (float)iterations / MAX_ITERATIONS * 255;
+    return (float)n / max * 255;
 }
 
-void writePixels(uint_fast32_t width, uint_fast32_t height, uint_fast32_t rowLength, FILE *target)
+void writePixels(uint_fast32_t width, uint_fast32_t height, uint_fast32_t rowLength, FILE *target, uint_fast16_t maxIterations)
 {
     for (uint_fast32_t y = 0; y < height; y++)
     {
         for (uint_fast32_t x = 0; x < width; x++)
         {
-            uint_fast16_t iterations = getIterations(width, height, x, y);
-            uint_fast8_t color = mapIterationsToColor(iterations);
+            uint_fast16_t iterations = getIterations(width, height, x, y, maxIterations);
+            uint_fast8_t color = mapIterationsToColor(iterations, maxIterations);
             fwrite(&color, 1, 1, target);
         }
         for (uint_fast8_t p = 0; p < rowLength - width; p++)
@@ -106,17 +105,18 @@ void writePixels(uint_fast32_t width, uint_fast32_t height, uint_fast32_t rowLen
 
 uint_fast8_t main(uint_fast8_t argc, char *argv[])
 {
-    if (argc != 4)
+    if (argc != 5)
     {
-        fprintf(stderr, "The program accepts exactly three positional arguments: image width, height, and output path");
+        fprintf(stderr, "The program accepts exactly three positional arguments: image width, height, output path, and max number of iterations");
         return 1;
     }
 
     uint_fast32_t width = atoi(argv[1]);
     uint_fast32_t height = atoi(argv[2]);
-    if (width < 1 || height < 1)
+    uint_fast16_t maxIterations = atoi(argv[4]);
+    if (width < 1 || height < 1 || maxIterations < 4)
     {
-        fprintf(stderr, "Incorrect dimensions");
+        fprintf(stderr, "At least one numerical value is too small");
         return 1;
     }
 
@@ -129,7 +129,7 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
 
     uint_fast32_t rowLength = ceil(BITS_PER_PIXEL * width / 32) * 4;
     writeHeaders(width, height, rowLength, output);
-    writePixels(width, height, rowLength, output);
+    writePixels(width, height, rowLength, output, maxIterations);
 
     fclose(output);
     return 0;
