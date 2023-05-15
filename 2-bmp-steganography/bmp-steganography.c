@@ -155,9 +155,9 @@ void histogram(Refs *refs)
     Hist16Bins histGreen = {"Green", {0}};
     Hist16Bins histRed = {"Red", {0}};
 
-    for (uint_fast32_t y = 0; y < refs->infoHeader.biHeight; y++)
+    for (LONG y = 0; y < refs->infoHeader.biHeight; y++)
     {
-        for (uint_fast32_t x = 0; x < refs->infoHeader.biWidth; x++)
+        for (LONG x = 0; x < refs->infoHeader.biWidth; x++)
         {
             uint_fast8_t blue, green, red;
 
@@ -182,9 +182,9 @@ void histogram(Refs *refs)
 
 void grayscale(Refs *refs)
 {
-    for (uint_fast32_t y = 0; y < refs->infoHeader.biHeight; y++)
+    for (LONG y = 0; y < refs->infoHeader.biHeight; y++)
     {
-        for (uint_fast32_t x = 0; x < refs->infoHeader.biWidth; x++)
+        for (LONG x = 0; x < refs->infoHeader.biWidth; x++)
         {
             uint_fast8_t blue, green, red;
 
@@ -212,7 +212,7 @@ void encode(Refs *refs)
     uint_fast32_t bits = 0;
     uint_fast8_t value;
 
-    for (uint_fast32_t y = 0; y < refs->infoHeader.biHeight; y++)
+    for (LONG y = 0; y < refs->infoHeader.biHeight; y++)
     {
         for (uint_fast32_t b = 0; b < refs->rowLength; b++)
         {
@@ -244,7 +244,7 @@ void decode(Refs *refs)
     uint_fast32_t bits = 0;
     uint_fast8_t value;
 
-    for (uint_fast32_t y = 0; y < refs->infoHeader.biHeight; y++)
+    for (LONG y = 0; y < refs->infoHeader.biHeight; y++)
     {
         for (uint_fast32_t b = 0; b < refs->rowLength; b++)
         {
@@ -269,7 +269,7 @@ void decode(Refs *refs)
     free(decoded);
 }
 
-uint_fast8_t main(uint_fast8_t argc, char *argv[])
+int main(int argc, char *argv[])
 {
     Refs refs = {};
 
@@ -280,8 +280,10 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     {
     case 4:
         refs.textToEncode = argv[3];
+        [[fallthrough]];
     case 3:
         outputPath = argv[2];
+        [[fallthrough]];
     case 2:
         inputPath = argv[1];
         break;
