@@ -73,7 +73,7 @@ uint_fast16_t getIterations(uint_fast32_t width, uint_fast32_t height, uint_fast
     for (uint_fast16_t i = 0; i < maxIterations; i++)
     {
         z = z * z + c;
-        if (abs(z) > 2)
+        if (cabs(z) > 2)
         {
             return i;
         }
@@ -103,7 +103,7 @@ void writePixels(uint_fast32_t width, uint_fast32_t height, uint_fast32_t rowLen
     }
 }
 
-uint_fast8_t main(uint_fast8_t argc, char *argv[])
+int main(int argc, char *argv[])
 {
     if (argc != 5)
     {
