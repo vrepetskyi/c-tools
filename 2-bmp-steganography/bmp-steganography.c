@@ -36,6 +36,10 @@ typedef struct Refs
 {
     FILE *input;
     FILE *output;
+    char *textToEncode;
+    BITMAPINFOHEADER infoHeader;
+    uint_fast32_t rowLength;
+    uint_fast32_t maxEncodingLength;
 } Refs;
 
 void freeRefs(Refs *refs)
@@ -145,16 +149,137 @@ void printHist16Bins(Hist16Bins *hist)
     }
 }
 
+void histogram(Refs *refs)
+{
+    Hist16Bins histBlue = {"Blue", {0}};
+    Hist16Bins histGreen = {"Green", {0}};
+    Hist16Bins histRed = {"Red", {0}};
+
+    for (uint_fast32_t y = 0; y < refs->infoHeader.biHeight; y++)
+    {
+        for (uint_fast32_t x = 0; x < refs->infoHeader.biWidth; x++)
+        {
+            uint_fast8_t blue, green, red;
+
+            fread(&blue, 1, 1, refs->input);
+            fread(&green, 1, 1, refs->input);
+            fread(&red, 1, 1, refs->input);
+
+            histBlue.bins[blue / 16]++;
+            histGreen.bins[green / 16]++;
+            histRed.bins[red / 16]++;
+        }
+        for (uint_fast8_t p = 0; p < refs->rowLength - refs->infoHeader.biWidth * 3; p++)
+        {
+            fseek(refs->input, 1, SEEK_CUR);
+        }
+    }
+
+    printHist16Bins(&histBlue);
+    printHist16Bins(&histGreen);
+    printHist16Bins(&histRed);
+}
+
+void grayscale(Refs *refs)
+{
+    for (uint_fast32_t y = 0; y < refs->infoHeader.biHeight; y++)
+    {
+        for (uint_fast32_t x = 0; x < refs->infoHeader.biWidth; x++)
+        {
+            uint_fast8_t blue, green, red;
+
+            fread(&blue, 1, 1, refs->input);
+            fread(&green, 1, 1, refs->input);
+            fread(&red, 1, 1, refs->input);
+
+            uint8_t grayscale = red * 0.299 + green * 0.587 + blue * 0.114;
+
+            fwrite(&grayscale, 1, 1, refs->output);
+            fwrite(&grayscale, 1, 1, refs->output);
+            fwrite(&grayscale, 1, 1, refs->output);
+        }
+        for (uint_fast8_t p = 0; p < refs->rowLength - refs->infoHeader.biWidth * 3; p++)
+        {
+            uint_fast8_t padding;
+            fread(&padding, 1, 1, refs->input);
+            fwrite(&padding, 1, 1, refs->output);
+        }
+    }
+}
+
+void encode(Refs *refs)
+{
+    uint_fast32_t bits = 0;
+    uint_fast8_t value;
+
+    for (uint_fast32_t y = 0; y < refs->infoHeader.biHeight; y++)
+    {
+        for (uint_fast32_t b = 0; b < refs->rowLength; b++)
+        {
+            uint8_t bit = bits % 8;
+            uint8_t byte = bits / 8;
+            fread(&value, 1, 1, refs->input);
+            // Modify least significant bit while there is data to encode
+            if (byte == 0 || refs->textToEncode[byte - 1] != '\0' || bit != 0)
+            {
+                // Get particular bit of text
+                if ((refs->textToEncode[byte] & (1 << bit)) >> bit)
+                    // Set least significant bit to 1
+                    value |= 0X01;
+                else
+                    // Set least significant bit to 0
+                    value &= 0XFE;
+                bits++;
+            }
+            fwrite(&value, 1, 1, refs->output);
+        }
+    }
+}
+
+void decode(Refs *refs)
+{
+    char *decoded = malloc(refs->maxEncodingLength + 1);
+    decoded[refs->maxEncodingLength] = '\0';
+
+    uint_fast32_t bits = 0;
+    uint_fast8_t value;
+
+    for (uint_fast32_t y = 0; y < refs->infoHeader.biHeight; y++)
+    {
+        for (uint_fast32_t b = 0; b < refs->rowLength; b++)
+        {
+            uint8_t bit = bits % 8;
+            uint8_t byte = bits / 8;
+            fread(&value, 1, 1, refs->input);
+            // Set decoded bits unless '\0' is met
+            if (byte != 0 && decoded[byte - 1] == '\0')
+                break;
+            // Get least significant bit from image
+            if (value & 0X01)
+                // Set bit to 1
+                decoded[byte] |= 1 << bit;
+            else
+                // Set bit to 0
+                decoded[byte] &= ~(1 << bit);
+            bits++;
+        }
+    }
+
+    printf("%s", decoded);
+    free(decoded);
+}
+
 uint_fast8_t main(uint_fast8_t argc, char *argv[])
 {
+    Refs refs = {};
+
     char *inputPath = NULL;
     char *outputPath = NULL;
-    char *textToEncode = NULL;
 
     switch (argc)
     {
     case 4:
-        textToEncode = argv[3];
+        refs.textToEncode = argv[3];
     case 3:
         outputPath = argv[2];
     case 2:
@@ -165,9 +290,7 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
         return 1;
     }
 
-    char mode = outputPath ? (textToEncode ? 'e' : 'g') : '\0';
-
-    Refs refs = {};
+    char mode = outputPath ? (refs.textToEncode ? 'e' : 'g') : '\0';
 
     refs.input = fopen(inputPath, "r");
     if (!refs.input)
@@ -187,28 +310,29 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     if (fileHeader.bfType != 0x4D42)
         throw("Input file is not a bitmap", &refs);
 
-    BITMAPINFOHEADER infoHeader;
-    initInfoHeader(&infoHeader, refs.input);
-    printInfoHeader(&infoHeader);
+    initInfoHeader(&refs.infoHeader, refs.input);
+    printInfoHeader(&refs.infoHeader);
 
-    if (infoHeader.biBitCount != 24 || infoHeader.biCompression != 0)
+    if (refs.infoHeader.biBitCount != 24 || refs.infoHeader.biCompression != 0)
         throw("Further operations are only supported for uncompressed 24-bit files", &refs);
 
-    int_fast32_t rowLength = ceil(24 * infoHeader.biWidth / 32) * 4;
-    int_fast32_t maxEncodingLength = rowLength * infoHeader.biHeight;
+    refs.rowLength = ceil(24 * refs.infoHeader.biWidth / 32) * 4;
+    refs.maxEncodingLength = refs.rowLength * (refs.infoHeader.biHeight);
 
-    if (textToEncode && strlen(textToEncode) > maxEncodingLength)
+    if (refs.textToEncode && strlen(refs.textToEncode) > refs.maxEncodingLength)
         throw("Image is too small to contain the whole text", &refs);
 
     if (!mode)
     {
         printf("\n(h)istogram/(d)ecode/(N)othing? ");
+
         mode = (char)fgetc(stdin);
         if (mode != 'h' && mode != 'd')
         {
             freeRefs(&refs);
             return 0;
         }
+
         fseek(refs.input, fileHeader.bfOffBits, SEEK_SET);
         printf("\n");
     }
@@ -216,122 +340,31 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     {
         fseek(refs.input, 0, SEEK_SET);
         void *headers = malloc(fileHeader.bfOffBits);
+
         if (!headers)
             throw("Failed to allocate memory for new file headers", &refs);
+
         fread(headers, fileHeader.bfOffBits, 1, refs.input);
         fwrite(headers, fileHeader.bfOffBits, 1, refs.output);
         free(headers);
     }
 
-    Hist16Bins histBlue = {"Blue", {0}};
-    Hist16Bins histGreen = {"Green", {0}};
-    Hist16Bins histRed = {"Red", {0}};
-
-    char *decoded = malloc(maxEncodingLength + 1);
-    decoded[maxEncodingLength] = '\0';
-
-    uint8_t blue, green, red, value;
-    uint_fast32_t bits = 0;
-    for (int_fast32_t r = 0; r < infoHeader.biHeight; r++)
+    void (*action)(Refs *);
+    if (mode == 'h')
+        action = histogram;
+    else if (mode == 'g')
+        action = grayscale;
+    else if (mode == 'e')
+        action = encode;
+    else if (mode == 'd')
+        action = decode;
+    else
     {
-        if (!refs.output)
-        {
-            if (mode == 'h')
-            {
-                // Histogram
-                for (int_fast32_t p = 0; p < infoHeader.biWidth; p++)
-                {
-                    fread(&blue, 1, 1, refs.input);
-                    fread(&green, 1, 1, refs.input);
-                    fread(&red, 1, 1, refs.input);
-
-                    histBlue.bins[blue / 16]++;
-                    histGreen.bins[green / 16]++;
-                    histRed.bins[red / 16]++;
-                }
-                for (uint_fast8_t p = 0; p < rowLength - infoHeader.biWidth * 3; p++)
-                {
-                    fseek(refs.input, 1, SEEK_CUR);
-                }
-            }
-            else
-            {
-                // Decode
-                for (int_fast32_t c = 0; c < rowLength; c++)
-                {
-                    uint8_t bit = bits % 8;
-                    uint8_t byte = bits / 8;
-                    fread(&value, 1, 1, refs.input);
-                    // Set decoded bits unless '\0' is met
-                    if (byte != 0 && decoded[byte - 1] == '\0')
-                        break;
-                    // Get least significant bit from image
-                    if (value & 0X01)
-                        // Set bit to 1
-                        decoded[byte] |= 1 << bit;
-                    else
-                        // Set bit to 0
-                        decoded[byte] &= ~(1 << bit);
-                    bits++;
-                }
-            }
-        }
-        else if (mode == 'g')
-        {
-            // Grayscale
-            for (int_fast32_t p = 0; p < infoHeader.biWidth; p++)
-            {
-                fread(&blue, 1, 1, refs.input);
-                fread(&green, 1, 1, refs.input);
-                fread(&red, 1, 1, refs.input);
-
-                uint8_t grayscale = red * 0.299 + green * 0.587 + blue * 0.114;
-
-                fwrite(&grayscale, 1, 1, refs.output);
-                fwrite(&grayscale, 1, 1, refs.output);
-                fwrite(&grayscale, 1, 1, refs.output);
-            }
-            for (uint_fast8_t p = 0; p < rowLength - infoHeader.biWidth * 3; p++)
-            {
-                fread(&value, 1, 1, refs.input);
-                fwrite(&value, 1, 1, refs.output);
-            }
-        }
-        else
-        {
-            // Encode
-            for (int_fast32_t c = 0; c < rowLength; c++)
-            {
-                uint8_t bit = bits % 8;
-                uint8_t byte = bits / 8;
-                fread(&value, 1, 1, refs.input);
-                // Modify least significant bit while there is data to encode
-                if (byte == 0 || textToEncode[byte - 1] != '\0' || bit != 0)
-                {
-                    // Get particular bit of text
-                    if ((textToEncode[byte] & (1 << bit)) >> bit)
-                        // Set least significant bit to 1
-                        value |= 0X01;
-                    else
-                        // Set least significant bit to 0
-                        value &= 0XFE;
-                    bits++;
-                }
-                fwrite(&value, 1, 1, refs.output);
-            }
-        }
+        fprintf(stderr, "%c", mode);
+        throw(" - mode is not supported", &refs);
     }
 
-    if (mode == 'd')
-    {
-        printf("%s", decoded);
-    }
-    else if (mode == 'h')
-    {
-        printHist16Bins(&histBlue);
-        printHist16Bins(&histGreen);
-        printHist16Bins(&histRed);
-    }
+    action(&refs);
 
     freeRefs(&refs);
     return 0;
