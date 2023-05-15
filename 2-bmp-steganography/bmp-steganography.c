@@ -265,7 +265,7 @@ void decode(Refs *refs)
         }
     }
 
-    printf("%s", decoded);
+    printf("%s\n", decoded);
     free(decoded);
 }
 
@@ -288,8 +288,7 @@ int main(int argc, char *argv[])
         inputPath = argv[1];
         break;
     default:
-        fprintf(stderr, "Incorrect arguments");
-        return 1;
+        throw("Expected at least 1 and no more than 3 arguments", &refs);
     }
 
     char mode = outputPath ? (refs.textToEncode ? 'e' : 'g') : '\0';
