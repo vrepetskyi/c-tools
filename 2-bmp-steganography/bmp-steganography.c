@@ -1,5 +1,4 @@
 #include <math.h>
-#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -166,6 +165,8 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
         return 1;
     }
 
+    char mode = outputPath ? (textToEncode ? 'e' : 'g') : '\0';
+
     Refs refs = {};
 
     refs.input = fopen(inputPath, "r");
@@ -193,24 +194,26 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     if (infoHeader.biBitCount != 24 || infoHeader.biCompression != 0)
         throw("Further operations are only supported for uncompressed 24-bit files", &refs);
 
-    int_fast32_t rowLength = floor((24 * infoHeader.biWidth + 31) / 32) * 4;
+    int_fast32_t rowLength = ceil(24 * infoHeader.biWidth / 32) * 4;
     int_fast32_t maxEncodingLength = rowLength * infoHeader.biHeight;
 
     if (textToEncode && strlen(textToEncode) > maxEncodingLength)
         throw("Image is too small to contain the whole text", &refs);
 
-    bool decode;
-    if (!refs.output)
+    if (!mode)
     {
-        // Histogram or decode - jump to the data
+        printf("\n(h)istogram/(d)ecode/(N)othing? ");
+        mode = (char)fgetc(stdin);
+        if (mode != 'h' && mode != 'd')
+        {
+            freeRefs(&refs);
+            return 0;
+        }
         fseek(refs.input, fileHeader.bfOffBits, SEEK_SET);
-        printf("\nDecode steganography? [y/N]: ");
-        decode = fgetc(stdin) == 121;
         printf("\n");
     }
     else
     {
-        // Grayscale or encode - copy headers; end up at the data beginning
         fseek(refs.input, 0, SEEK_SET);
         void *headers = malloc(fileHeader.bfOffBits);
         if (!headers)
@@ -233,7 +236,7 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
     {
         if (!refs.output)
         {
-            if (!decode)
+            if (mode == 'h')
             {
                 // Histogram
                 for (int_fast32_t p = 0; p < infoHeader.biWidth; p++)
@@ -273,7 +276,7 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
                 }
             }
         }
-        else if (!textToEncode)
+        else if (mode == 'g')
         {
             // Grayscale
             for (int_fast32_t p = 0; p < infoHeader.biWidth; p++)
@@ -319,11 +322,11 @@ uint_fast8_t main(uint_fast8_t argc, char *argv[])
         }
     }
 
-    if (decode)
+    if (mode == 'd')
     {
         printf("%s", decoded);
     }
-    else if (!refs.output)
+    else if (mode == 'h')
     {
         printHist16Bins(&histBlue);
         printHist16Bins(&histGreen);
