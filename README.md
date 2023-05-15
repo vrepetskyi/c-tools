@@ -1,10 +1,12 @@
 # c-tools
 
-Those are the projects I've done as a part of low-level programming classes.
+Those are the projects I've done as a part of low-level programming classes
 
 ## 1-ini-parser
 
 `gcc ini-parser.c -o ini-parser`
+
+`./ini-parser <file> {<query>|lint}`
 
 ### Help
 
@@ -41,7 +43,7 @@ OpCtMOsHTmwPowOdXaZbEKUv
 
 ### Expression evaluation
 
-\*with nuances
+\*with nuances mentioned in help
 
 ```
 ❯ ./ini-parser small.ini 'scholarly-collection.shallow-a / scholarly-collection.shallow-a + double-piece.faint-affair'
@@ -52,6 +54,8 @@ QrfhHfwUrYXeKevENYkROpCtMOsHTmwPowOdXaZbEKUvfDulyrtjUHnKPwwAZ
 ```
 
 ### Linting
+
+Prints bad lines
 
 ```
 ❯ ./ini-parser corrupted.ini lint
@@ -66,6 +70,12 @@ QrfhHfwUrYXeKevENYkROpCtMOsHTmwPowOdXaZbEKUvfDulyrtjUHnKPwwAZ
 763: ahfd$$$dorable-sweaty-violent-serious-junior-ad = 803399
 ```
 
-## BMP editor
+## 2-bmp-steganography
 
-## Mandelbrot generator
+`gcc bmp-steganography.c -o bmp-steganography`
+
+`./bmp-steganography <input> [<output>] [<text-to-encode>]`
+
+## 3-bmp-generator
+
+`gcc mandelbrot.c -o mandelbrot -lm`
